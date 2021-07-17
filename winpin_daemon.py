@@ -1,4 +1,5 @@
 # finish this please
+# ALmost There!
 from wmctrl_lib import getActivewin,get_wininfo
 
 from dasbus.server.interface import dbus_interface
@@ -45,23 +46,25 @@ class StateData(DBusData):
         self._state = not self._state
 
 GlobalState = StateData()
-Cache = dict()
+AppIdCache = dict()
+
 @dbus_interface("org.example.WindowPinnerD")
 class WindowPinnerDInterface(InterfaceTemplate):
 
     def AppToggle(self,appname:Str,startapp:Str):
         # require state to have app id 
-        print(appname,startapp)
+        print("running appnak",appname,startapp)
         self.implementation.spawnApp(appname,startapp)
-        if Cache.__len__() == 0 or not appname in Cache:
-            Cache[appname] = get_wininfo(appname)
-
-        appid = Cache[appname]
+        if AppIdCache.__len__() == 0 or not appname in AppIdCache:
+            AppIdCache[appname] = get_wininfo(appname)
+        
+        appid = AppIdCache[appname]
+            
         print("{}:{}".format(appname,appid))
         GlobalState.appid = appid
 
         # call app toggle
-        self.implementation.appToggleCore(appid,[startapp])
+        self.implementation.appToggleCore(appid)
         # app toggle then call togglePin which implemented togglePinCore
         
     def Pid(self) -> Int32:
@@ -76,6 +79,8 @@ class WindowPinnerDInterface(InterfaceTemplate):
     
 
 State = True
+WinIdCache = []
+
 class WindowPinnerD(Publishable,WindowPinnerCore):
 
     def __init__(self):
@@ -91,24 +96,50 @@ class WindowPinnerD(Publishable,WindowPinnerCore):
     def for_publication(self):
         return WindowPinnerDInterface(self)
     
+    @staticmethod
+    def checkInCache(last_window):
+        print("cache ===> ",AppIdCache)
+        for key in AppIdCache:
+            print("ccc",last_window,AppIdCache[key].strip())
+            if last_window == AppIdCache[key].strip():
+                print("bruh true")
+                return True
+
+
     def pinToggle(self):
 
         GlobalState.reverse()
 
         struct = StateData.to_structure(GlobalState)
         self.state = not struct["state"]
-        #self.appid = struct["appid"]
-        #try :
-        #    awin = getActivewin()
-        #except Exception:
-        #    print("cannot get window")
-        #    return
         awin = getActivewin()
-
+        
 
         appid = "{}".format(struct["appid"]).strip().replace("'","")
+        #print("========> appidL",appid)
         #print("This is active window =>>>>>>>>>>>",awin,self.state)
-        if awin == appid:
+        isApp = WindowPinnerD.checkInCache(awin)
+
+        WinIdCache.append(awin)
+
+        print("PromaCache",WinIdCache)
+        lastItem = WinIdCache[len(WinIdCache) - 1]
+
+        if len(WinIdCache) > 10:
+            last2nItem = WinIdCache[len(WinIdCache) - 2] 
+            WinIdCache.clear()
+            WinIdCache.append(last2nItem)
+            WinIdCache.append(lastItem)
+
+        #print("ababababa",lastItem,isApp)
+        #print("checkin",WindowPinnerD.checkInCache(lastItem))
+
+        if isApp or WindowPinnerD.checkInCache(lastItem):
+            last2nItem = WinIdCache[len(WinIdCache) - 2] 
+            print("bruh is app =====>",isApp)
+            self.last_window = last2nItem
+        
+        if awin == appid :
             print("Dont set last window ===>?",appid)
             return
         
@@ -185,7 +216,30 @@ def spinUpDaemon():
     atexit.register(preDestroyHook)
     loop.run()
 
+def sendSignalOpen():
+    print("sending signal to opening app")
+
 if __name__ == "__main__":
 
     #daemon.start()
     spinUpDaemon()
+
+
+def testWindowPinner():
+    testPinD = WindowPinnerD()
+    def testToggle(winpinnerD,appname,startapp):
+
+        print("running appnak",appname,startapp)
+        winpinnerD.spawnApp(appname,startapp)
+        if AppIdCache.__len__() == 0 or not appname in AppIdCache:
+            AppIdCache[appname] = get_wininfo(appname)
+        
+        appid = AppIdCache[appname]
+            
+        print("{}:{}".format(appname,appid))
+        GlobalState.appid = appid
+
+        # call app toggle
+        winpinnerD.appToggleCore(appid)
+    testToggle(testPinD,"brave-browser","brave")
+

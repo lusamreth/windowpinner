@@ -128,7 +128,6 @@ def getActivewin():
             assert(len(lhs) == len(rhs))
             return lhs == rhs
         Winid = filter(lambda eid: getI(eid),list_wm_ids())
-        #print("ISD",list(Winid)[0])
         return list(Winid)[0]
 
 def getWorkspace(winTarget):
@@ -159,5 +158,4 @@ def fetchCurrentworkspace():
     except :
         raise Exception("Cannot fetch wmctrl -d")
    #print(wmctrlList.find(b'*'))
-
 

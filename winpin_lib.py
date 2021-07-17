@@ -7,6 +7,7 @@ import abc
 import os.path
 import time
 
+import os
 from multiprocessing import Pool
 import threading
 
@@ -87,8 +88,8 @@ class WindowPinnerCore(metaclass=abc.ABCMeta):
             print("no app is running, launching")
             if appname == "spotify":
                 exec_bash=["/mnt/coding/system-testing/spt-musc"]
-            openning = lambda : subprocess.Popen(exec_bash,shell=False)
-            subprocess.call(exec_bash)
+
+            subprocess.Popen(exec_bash, close_fds=True)
             return
     
     # trranslate state in file to boolean
@@ -103,15 +104,11 @@ class WindowPinnerCore(metaclass=abc.ABCMeta):
         return goto
 
     # use to build addtional /different mode of toggle
-    def appToggleCore(self,appid,exec_bash):
+    def appToggleCore(self,appid):
 
         self.pinToggle()
         self.translateToBool()
         #self.persistanceToggle()
-        if not isinstance(exec_bash,list):
-            print("not a list!")
-            return
-         
 
         gotoApp = self.buildGoto(appid)
         awin = getActivewin()
@@ -171,10 +168,10 @@ class WindowPinnerCore(metaclass=abc.ABCMeta):
 
     def appToggle(self,appname,exec_bash):
         WindowPinner.spawnApp(appname,exec_bash)
-        print("wininfo",get_wininfo(appname))
+        #print("wininfo",get_wininfo(appname))
         appid = get_wininfo(appname)
         #self.pinToggle()
-        self.appToggleCore(appid,exec_bash=exec_bash)
+        self.appToggleCore(appid)
 
     def isLastwin(self):
         ati = getActivewin()

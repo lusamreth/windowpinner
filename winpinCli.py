@@ -101,7 +101,6 @@ def activate_toggle(args):
         Pinner.appToggle(args.toggle,[args.spawn])
 
 
-
 for arg in args.__dict__:
     arg_input=args.__dict__[arg]
     if arg_input is not None:
