@@ -1,16 +1,17 @@
 # finish this please
 # ALmost There!
 from wmctrl_lib import getActivewin,get_wininfo
-
 from dasbus.server.interface import dbus_interface
 from dasbus.connection import SessionMessageBus
 from dasbus.typing import Str,Bool,Int32
 
-from winpin_lib import WindowPinnerCore
+from winpin_lib import WindowPinnerCore,spawnApp
 from dasbus.loop import EventLoop
 
-from daemonize import Daemonize
 import os
+import time
+import subprocess
+
 loop = EventLoop()
 
 bus = SessionMessageBus()
@@ -54,8 +55,8 @@ class WindowPinnerDInterface(InterfaceTemplate):
     def AppToggle(self,appname:Str,startapp:Str):
         # require state to have app id 
         print("running appnak",appname,startapp)
-        self.implementation.spawnApp(appname,startapp)
         if AppIdCache.__len__() == 0 or not appname in AppIdCache:
+            spawnApp(appname,startapp)
             AppIdCache[appname] = get_wininfo(appname)
         
         appid = AppIdCache[appname]
@@ -72,15 +73,54 @@ class WindowPinnerDInterface(InterfaceTemplate):
 
     def PingD(self) -> Str:
         return self.implementation.ping()
-
+    
     def Lock(self):
-        print("lockhin")
+        print("locking")
+        #pingXdotool(0.0005)
+        print("after lock")
         self.implementation.lockMechanism()
     
+#asyncio.new_event_loop()
 
 State = True
 WinIdCache = []
 
+class cacheCleaner:
+    @staticmethod
+    def buildresetArray(arr):
+        return lambda keepElement:resetArrayFactory(arr,traverseLength=keepElement)
+
+def grabEndFactory(cacheArray,tempArr):
+    cacheLen = len(cacheArray) - 1
+    ar = tempArr
+
+    # prevent reversed array
+    def traverseBackCache(traverseLength):
+        tmp = []
+        [tmp.append(cacheArray[cacheLen - i]) for i in range(traverseLength)]
+        assert len(tmp) > 0
+        tmp.reverse()
+        tempArr = ar
+        
+        [tempArr.append(i) for i in tmp]
+
+    #traverseBackCache = lambda traverseLength : [tempArr.append(cacheArray[cacheLen -
+    #    i]) for i in range(traverseLength)]
+    return traverseBackCache
+
+def resetArrayFactory(cacheArray,traverseLength):
+    assert len(cacheArray) > traverseLength
+
+    tempArr = []
+    copyTmpToCache = lambda tempArr : [cacheArray.append(tempArr[i]) for i in range(traverseLength)]
+
+    grabEnd = grabEndFactory(cacheArray,tempArr)
+    grabEnd(traverseLength)
+
+    cacheArray.clear()
+    copyTmpToCache(tempArr)
+
+Locker = dict()
 class WindowPinnerD(Publishable,WindowPinnerCore):
 
     def __init__(self):
@@ -100,12 +140,12 @@ class WindowPinnerD(Publishable,WindowPinnerCore):
     def checkInCache(last_window):
         print("cache ===> ",AppIdCache)
         for key in AppIdCache:
-            print("ccc",last_window,AppIdCache[key].strip())
+            #print("ccc",last_window,AppIdCache[key].strip())
             if last_window == AppIdCache[key].strip():
                 print("bruh true")
                 return True
 
-
+    
     def pinToggle(self):
 
         GlobalState.reverse()
@@ -113,44 +153,61 @@ class WindowPinnerD(Publishable,WindowPinnerCore):
         struct = StateData.to_structure(GlobalState)
         self.state = not struct["state"]
         awin = getActivewin()
-        
-
-        appid = "{}".format(struct["appid"]).strip().replace("'","")
-        #print("========> appidL",appid)
-        #print("This is active window =>>>>>>>>>>>",awin,self.state)
-        isApp = WindowPinnerD.checkInCache(awin)
 
         WinIdCache.append(awin)
+        appid = "{}".format(struct["appid"]).strip().replace("'","")
+        isApp = WindowPinnerD.checkInCache(awin)
 
-        print("PromaCache",WinIdCache)
-        lastItem = WinIdCache[len(WinIdCache) - 1]
+        l = len(WinIdCache)
+        last2ndItem = WinIdCache[l - 2]
+        last1stItem = WinIdCache[l - 1]
 
+        resetter = cacheCleaner().buildresetArray(WinIdCache)
         if len(WinIdCache) > 10:
-            last2nItem = WinIdCache[len(WinIdCache) - 2] 
-            WinIdCache.clear()
-            WinIdCache.append(last2nItem)
-            WinIdCache.append(lastItem)
-
-        #print("ababababa",lastItem,isApp)
-        #print("checkin",WindowPinnerD.checkInCache(lastItem))
-
-        if isApp or WindowPinnerD.checkInCache(lastItem):
-            last2nItem = WinIdCache[len(WinIdCache) - 2] 
-            print("bruh is app =====>",isApp)
-            self.last_window = last2nItem
+            resetter(keepElement=4)
         
+
+        if isApp or WindowPinnerD.checkInCache(last1stItem):
+            self.last_window = last2ndItem
+            return
+
         if awin == appid :
             print("Dont set last window ===>?",appid)
             return
+        
         
         if not self.state or awin != appid:
             self.cache_window = None
             self.last_window = awin
     
+
+    def autoadjustLastWin(self,pollrate,limit=None):
+        if limit is None :
+            limit = int('inf')
+
+        getws = lambda : subprocess.run(["xdotool","get_desktop"],capture_output=True).stdout.decode()
+        cur = getws()
+        count = 0
+
+        while count < limit:
+            time.sleep(1/pollrate)
+            ws = getws()
+
+            prev = cur 
+            cur = ws
+
+            if prev != cur :
+                print("workspace has change!")
+                self.isChanged = True
+                self.last_window = getActivewin()
+                #exit(1)
+            count += 1
+
     def lockMechanism(self):
-        # put the name inside the cache 
-        # just like the app name
-        print("hello")
+        awin = getActivewin()
+        GlobalState.appid = awin 
+        print("locking")
+        self.appToggleCore(awin)
 
 
 from dasbus.server.container import DBusContainer
@@ -158,19 +215,19 @@ from dasbus.server.container import DBusContainer
 AppPath = "/tmp/winpinner"
 pidfilepath = os.path.join(AppPath, "windowpinDaemon.pid")
 
-def stampPid():
-
-    if not os.path.exists(AppPath):
-        os.mkdir(AppPath)
-    elif not os.path.isfile(pidfilepath):
-        with open(pidfilepath,"x") as F:
-            print(os.getpid())
-            F.write("{}".format(os.getpid()))
-    else:
-        with open(pidfilepath,"w") as F:
-            print(os.getpid())
-            F.write("{}".format(os.getpid()))
-        print("pre-start hook is setup! Proceeding...")
+#def stampPid():
+#
+#    if not os.path.exists(AppPath):
+#        os.mkdir(AppPath)
+#    elif not os.path.isfile(pidfilepath):
+#        with open(pidfilepath,"x") as F:
+#            print(os.getpid())
+#            F.write("{}".format(os.getpid()))
+#    else:
+#        with open(pidfilepath,"w") as F:
+#            print(os.getpid())
+#            F.write("{}".format(os.getpid()))
+#        print("pre-start hook is setup! Proceeding...")
 
 import atexit
 
@@ -186,22 +243,10 @@ def preDestroyHook():
         print("pre destroy hook!")
         F.write("")
 
-def testDaemon():
-    import logging
-    import sys
-
-    child_logger = logging.getLogger("tba")
-    child_logger.setLevel(logging.DEBUG)
-    child_logger.addHandler(logging.FileHandler("/tmp/test.txt"))
-    #streamhdr = logging.StreamHandler(sys.stdout)
-    while True:
-        sleep(2)
-        child_logger.debug("bruh stop it mtf")
-
 
 def spinUpDaemon():
     print("stamp")
-    stampPid()
+    #stampPid()
 
     container = DBusContainer(
         namespace=("org", "winpinner", "WindowPinnerD"),
@@ -213,33 +258,56 @@ def spinUpDaemon():
     print("Starting winpinner daemon!")
 
     bus.register_service("org.example.WindowPinnerD")
-    atexit.register(preDestroyHook)
+    #atexit.register(preDestroyHook)
     loop.run()
 
-def sendSignalOpen():
-    print("sending signal to opening app")
 
 if __name__ == "__main__":
-
-    #daemon.start()
     spinUpDaemon()
 
+import unittest
 
-def testWindowPinner():
-    testPinD = WindowPinnerD()
-    def testToggle(winpinnerD,appname,startapp):
+def mockResetter(rangeNum,keepElement):
+    arr = []
+    [arr.append(x) for x in range(rangeNum)]
+    cleaner = cacheCleaner().buildresetArray(arr)
+    cleaner(keepElement)
+    return arr
 
-        print("running appnak",appname,startapp)
-        winpinnerD.spawnApp(appname,startapp)
-        if AppIdCache.__len__() == 0 or not appname in AppIdCache:
-            AppIdCache[appname] = get_wininfo(appname)
+def mockGrab(rangeNum,grablastElementRange):
+    temp = []
+    cacheExample = []
+
+    [cacheExample.append(x) for x in range(rangeNum)]
+
+    grabE = grabEndFactory(cacheExample,temp)
+    grabE(grablastElementRange)
+    return temp
+
+class testTraverser(unittest.TestCase):
+
+    def testGrepEle(self):
+        temp = mockGrab(rangeNum=10,grablastElementRange=2)    
+        last2items = [8,9]
+
+        #assert temp == last2items
+        self.assertTrue(temp == last2items)
+
+    def testResetter(self):
+        cacheExample = mockResetter(10,2)
         
-        appid = AppIdCache[appname]
-            
-        print("{}:{}".format(appname,appid))
-        GlobalState.appid = appid
+        expectRes = [8,9]
+        self.assertTrue(expectRes == cacheExample)
 
-        # call app toggle
-        winpinnerD.appToggleCore(appid)
-    testToggle(testPinD,"brave-browser","brave")
+    def testIfReversed(self):
+        NotExpect = [9,8]
+        self.assertFalse(NotExpect == mockResetter(10,2))
+        
+    def testIfGrabReversed(self):
+        NotExpect = [9,8]
+        temp = mockGrab(rangeNum=10,grablastElementRange=2)    
+        self.assertFalse(NotExpect == temp)
+
+
+
 
